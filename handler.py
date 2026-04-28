@@ -545,6 +545,64 @@ def handler(job):
         logger.error(f"출력 비디오 파일이 존재하지 않습니다: {output_video_path}")
         return {"error": f"비디오 파일을 찾을 수 없습니다: {output_video_path}"}
 
+    # ------------------------------------------------------------------
+    # Clony watermark — burned in here on the GPU container so every
+    # generated video carries the AI-generated marker (EU AI Act Art. 50
+    # compliance). Disabled if /app/watermark.png is missing or the
+    # request opts out via clony_skip_watermark for testing.
+    # ------------------------------------------------------------------
+    skip_watermark = bool(job_input.get("clony_skip_watermark"))
+    # Dockerfile does `COPY . .` into / so the watermark.png shipped
+    # alongside handler.py lands at /watermark.png. Fall back to /app/
+    # for older builds that landed it there.
+    watermark_path = next(
+        (p for p in ("/watermark.png", "/app/watermark.png") if os.path.exists(p)),
+        "",
+    )
+    if not skip_watermark and watermark_path:
+        try:
+            # Probe video height so the watermark scales sensibly across
+            # 256/512/720+ output sizes — 8% of frame height, capped 40-96 px.
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=height",
+                 "-of", "default=noprint_wrappers=1:nokey=1",
+                 output_video_path],
+                capture_output=True, text=True, check=True, timeout=30,
+            )
+            video_height = int((probe.stdout or "512").strip() or "512")
+        except Exception as e:
+            logger.warning(f"ffprobe failed, defaulting watermark height: {e}")
+            video_height = 512
+        wm_height = max(40, min(int(video_height * 0.08), 96))
+
+        watermarked_path = output_video_path.replace(".mp4", "_wm.mp4")
+        if watermarked_path == output_video_path:
+            watermarked_path = output_video_path + ".wm.mp4"
+        try:
+            subprocess.check_call([
+                "ffmpeg", "-y", "-loglevel", "warning",
+                "-i", output_video_path,
+                "-i", watermark_path,
+                "-filter_complex",
+                f"[1:v]scale=-1:{wm_height}[wm];"
+                "[0:v][wm]overlay=W-w-24:H-h-24[outv]",
+                "-map", "[outv]",
+                "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-c:a", "aac", "-b:a", "192k",
+                "-movflags", "+faststart",
+                watermarked_path,
+            ], timeout=180)
+            logger.info(f"✅ Watermarked: {watermarked_path}")
+            output_video_path = watermarked_path
+        except Exception as e:
+            logger.error(f"⚠️ Watermark step failed, returning unwatermarked video: {e}")
+    elif skip_watermark:
+        logger.info("clony_skip_watermark=true → watermark step skipped")
+    else:
+        logger.warning(f"watermark image not found at {watermark_path} — returning unwatermarked video")
+
     # network_volume 파라미터 확인
     use_network_volume = job_input.get("network_volume", False)
     logger.info(f"네트워크 볼륨 사용 여부: {use_network_volume}")
