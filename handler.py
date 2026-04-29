@@ -580,6 +580,12 @@ def handler(job):
         if watermarked_path == output_video_path:
             watermarked_path = output_video_path + ".wm.mp4"
         try:
+            # The PNG already carries its own alpha (rounded-corner pill +
+            # logo + wordmark). We let it through at full alpha — the
+            # source asset is the single source of truth for visual
+            # weight, so any tweaks to "more / less visible" should be
+            # made in watermark.png itself rather than via a separate
+            # `format=rgba,colorchannelmixer=aa=…` step.
             subprocess.check_call([
                 "ffmpeg", "-y", "-loglevel", "warning",
                 "-i", output_video_path,
