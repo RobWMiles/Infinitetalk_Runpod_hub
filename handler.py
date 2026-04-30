@@ -574,7 +574,7 @@ def handler(job):
         except Exception as e:
             logger.warning(f"ffprobe failed, defaulting watermark height: {e}")
             video_height = 512
-        wm_height = max(40, min(int(video_height * 0.08), 96))
+        wm_height = max(32, min(int(video_height * 0.064), 77))
 
         watermarked_path = output_video_path.replace(".mp4", "_wm.mp4")
         if watermarked_path == output_video_path:
@@ -592,7 +592,7 @@ def handler(job):
                 "-i", watermark_path,
                 "-filter_complex",
                 f"[1:v]scale=-1:{wm_height}[wm];"
-                "[0:v][wm]overlay=W-w-24:H-h-24[outv]",
+                "[0:v][wm]overlay=W-w-14:H-h-14[outv]",
                 "-map", "[outv]",
                 "-map", "0:a?",
                 "-c:v", "libx264", "-preset", "medium", "-crf", "20",
