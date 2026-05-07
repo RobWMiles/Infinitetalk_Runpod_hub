@@ -277,6 +277,26 @@ def calculate_max_frames_from_audio(wav_path, wav_path_2=None, fps=25):
 
 
 def handler(job):
+    """RunPod entry point. Wrapped in a top-level try/except so any
+    unhandled exception (ComfyUI crash, OOM, websocket error, …) is
+    logged with full traceback and returned as a structured `{"error":
+    ...}` response instead of bubbling up and killing the worker. RunPod
+    auto-retries crashed workers on the same job, which compounded into
+    the "worker exited with exit code 1" loops we were seeing — this
+    pattern surfaces the real cause and lets the job fail cleanly."""
+    try:
+        return _handle(job)
+    except Exception as e:
+        import traceback as _tb
+        tb_tail = "\n".join(_tb.format_exc().strip().splitlines()[-15:])
+        logger.error(f"handler crashed: {e}\n{tb_tail}")
+        return {
+            "error": f"handler_crashed: {e}",
+            "traceback": tb_tail,
+        }
+
+
+def _handle(job):
     job_input = job.get("input", {})
 
     # job_input을 로깅할 때 base64 데이터는 truncate해서 출력
